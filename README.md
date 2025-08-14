@@ -22,7 +22,7 @@
 
 1. 克隆仓库
 ```bash
-git clone https://github.com/你的用户名/scrapecoins.git
+git clone https://github.com/TinleyMaster/scrapecoins.git
 cd scrapecoins
 ```
 

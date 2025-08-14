@@ -1,34 +1,25 @@
 // 主要的前端逻辑
 class CryptoApp {
     constructor() {
-        this.cryptoGrid = document.getElementById('crypto-grid');
         this.tableContainer = document.getElementById('table-container');
+        this.logContainer = document.getElementById('log-container');
+        this.logContent = document.getElementById('log-content');
         this.tableBody = document.getElementById('crypto-table-body');
-        this.priceChart = null;
-        this.chartData = {
-            labels: [],
-            datasets: []
-        };
-        this.currentView = 'card';
+        this.currentView = 'log';
         this.currentData = [];
         this.sortColumn = 'rank';
         this.sortDirection = 'asc';
-        this.scraperStatus = null;
+        this.scraperStatus = {};
+        this.maxLogMessages = 1000;
         this.init();
     }
 
     async init() {
         try {
-            // 初始化图表
-            this.initChart();
-            
-            // 设置事件监听器
             this.setupEventListeners();
-            
-            // 加载初始数据
+            this.switchView('log');
             await this.loadInitialData();
-            
-            // 设置定时刷新
+            await this.checkAllScrapersStatus();
             this.setupAutoRefresh();
         } catch (error) {
             console.error('应用初始化失败:', error);
@@ -37,7 +28,7 @@ class CryptoApp {
     }
 
     setupEventListeners() {
-        // 只保留表格视图按钮（如果需要的话）
+        // 视图切换按钮
         const tableViewBtn = document.getElementById('table-view-btn');
         if (tableViewBtn) {
             tableViewBtn.addEventListener('click', () => {
@@ -45,32 +36,55 @@ class CryptoApp {
             });
         }
         
-        // 爬虫控制按钮
+        const logViewBtn = document.getElementById('log-view-btn');
+        if (logViewBtn) {
+            logViewBtn.addEventListener('click', () => {
+                this.switchView('log');
+            });
+        }
+        
+        // 清空日志按钮
+        const clearLogsBtn = document.getElementById('clear-logs-btn');
+        if (clearLogsBtn) {
+            clearLogsBtn.addEventListener('click', () => {
+                this.clearLogs();
+            });
+        }
+        
+        // 全局爬虫控制按钮
         const scraperStatusBtn = document.getElementById('scraper-status-btn');
         if (scraperStatusBtn) {
             scraperStatusBtn.addEventListener('click', () => {
-                this.checkScraperStatus();
+                this.checkAllScrapersStatus();
             });
         }
         
-        const startScraperBtn = document.getElementById('start-scraper-btn');
-        if (startScraperBtn) {
-            startScraperBtn.addEventListener('click', () => {
-                this.startScraper();
+        const startAllScrapersBtn = document.getElementById('start-all-scrapers-btn');
+        if (startAllScrapersBtn) {
+            startAllScrapersBtn.addEventListener('click', () => {
+                this.startAllScrapers();
             });
         }
         
-        const stopScraperBtn = document.getElementById('stop-scraper-btn');
-        if (stopScraperBtn) {
-            stopScraperBtn.addEventListener('click', () => {
-                this.stopScraper();
+        const stopAllScrapersBtn = document.getElementById('stop-all-scrapers-btn');
+        if (stopAllScrapersBtn) {
+            stopAllScrapersBtn.addEventListener('click', () => {
+                this.stopAllScrapers();
             });
         }
         
-        const runOnceBtn = document.getElementById('run-once-btn');
-        if (runOnceBtn) {
-            runOnceBtn.addEventListener('click', () => {
-                this.runScraperOnce();
+        // 独立爬虫开关
+        const coingeckoToggle = document.getElementById('coingecko-toggle');
+        if (coingeckoToggle) {
+            coingeckoToggle.addEventListener('change', (e) => {
+                this.toggleScraper('coingecko', e.target.checked);
+            });
+        }
+        
+        const dropstabToggle = document.getElementById('dropstab-toggle');
+        if (dropstabToggle) {
+            dropstabToggle.addEventListener('change', (e) => {
+                this.toggleScraper('dropstab', e.target.checked);
             });
         }
         
@@ -93,14 +107,111 @@ class CryptoApp {
         const sortableHeaders = document.querySelectorAll('.sortable');
         sortableHeaders.forEach(header => {
             header.addEventListener('click', () => {
-                const column = header.dataset.sort;
-                this.sortTable(column);
+                this.sortTable(header.dataset.sort);
             });
         });
     }
 
-    updateDisplay() {
-        this.updateCryptoTable(this.currentData);
+    // 独立爬虫控制方法
+    async toggleScraper(scraperType, enabled) {
+        try {
+            const action = enabled ? 'start' : 'stop';
+            const response = await fetch(`/api/scraper/${scraperType}/${action}`, { 
+                method: 'POST' 
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showMessage(`${scraperType} 爬虫${enabled ? '启动' : '停止'}成功`, 'success');
+                setTimeout(() => this.checkScraperStatus(scraperType), 1000);
+            } else {
+                this.showError(data.error || `${scraperType} 爬虫${enabled ? '启动' : '停止'}失败`);
+                // 恢复开关状态
+                const toggle = document.getElementById(`${scraperType}-toggle`);
+                if (toggle) toggle.checked = !enabled;
+            }
+        } catch (error) {
+            console.error(`${scraperType} 爬虫控制失败:`, error);
+            this.showError(`${scraperType} 爬虫控制失败`);
+            // 恢复开关状态
+            const toggle = document.getElementById(`${scraperType}-toggle`);
+            if (toggle) toggle.checked = !enabled;
+        }
+    }
+
+    async checkScraperStatus(scraperType) {
+        try {
+            const response = await fetch(`/api/scraper/${scraperType}/status`);
+            const data = await response.json();
+            
+            if (data.success) {
+                this.scraperStatus[scraperType] = data.data;
+                this.updateScraperStatusDisplay(scraperType);
+            }
+        } catch (error) {
+            console.error(`检查${scraperType}爬虫状态失败:`, error);
+        }
+    }
+
+    async checkAllScrapersStatus() {
+        await Promise.all([
+            this.checkScraperStatus('coingecko'),
+            this.checkScraperStatus('dropstab')
+        ]);
+        this.updateGlobalScraperStatus();
+    }
+
+    updateScraperStatusDisplay(scraperType) {
+        const status = this.scraperStatus[scraperType];
+        const toggle = document.getElementById(`${scraperType}-toggle`);
+        const statusSpan = document.getElementById(`${scraperType}-status`);
+        
+        if (toggle && status) {
+            toggle.checked = status.running;
+        }
+        
+        if (statusSpan && status) {
+            statusSpan.textContent = status.running ? '运行中' : '已停止';
+            statusSpan.className = `scraper-status ${status.running ? 'running' : 'stopped'}`;
+        }
+    }
+
+    updateGlobalScraperStatus() {
+        const statusText = document.getElementById('scraper-status-text');
+        if (statusText) {
+            const runningScrapers = Object.values(this.scraperStatus).filter(s => s && s.running).length;
+            const totalScrapers = Object.keys(this.scraperStatus).length;
+            
+            if (runningScrapers === 0) {
+                statusText.innerHTML = `爬虫状态: <span class="status-stopped">全部停止</span>`;
+            } else if (runningScrapers === totalScrapers) {
+                statusText.innerHTML = `爬虫状态: <span class="status-running">全部运行中</span>`;
+            } else {
+                statusText.innerHTML = `爬虫状态: <span class="status-partial">部分运行中 (${runningScrapers}/${totalScrapers})</span>`;
+            }
+        }
+    }
+
+    async startAllScrapers() {
+        const toggles = ['coingecko-toggle', 'dropstab-toggle'];
+        for (const toggleId of toggles) {
+            const toggle = document.getElementById(toggleId);
+            if (toggle && !toggle.checked) {
+                toggle.checked = true;
+                await this.toggleScraper(toggle.dataset.scraper, true);
+            }
+        }
+    }
+
+    async stopAllScrapers() {
+        const toggles = ['coingecko-toggle', 'dropstab-toggle'];
+        for (const toggleId of toggles) {
+            const toggle = document.getElementById(toggleId);
+            if (toggle && toggle.checked) {
+                toggle.checked = false;
+                await this.toggleScraper(toggle.dataset.scraper, false);
+            }
+        }
     }
 
     switchView(viewType) {
@@ -111,14 +222,14 @@ class CryptoApp {
             btn.classList.remove('active');
         });
         
-        if (viewType === 'card') {
-            document.getElementById('card-view-btn').classList.add('active');
-            this.cryptoGrid.style.display = 'grid';
+        if (viewType === 'log') {
+            document.getElementById('log-view-btn').classList.add('active');
             this.tableContainer.style.display = 'none';
+            this.logContainer.style.display = 'block';
         } else {
             document.getElementById('table-view-btn').classList.add('active');
-            this.cryptoGrid.style.display = 'none';
             this.tableContainer.style.display = 'block';
+            this.logContainer.style.display = 'none';
         }
     }
 
@@ -130,7 +241,6 @@ class CryptoApp {
             if (data.success && data.data) {
                 this.currentData = data.data;
                 this.updateDisplay();
-                this.updateChart(data.data);
             } else {
                 throw new Error(data.error || '获取数据失败');
             }
@@ -141,22 +251,7 @@ class CryptoApp {
     }
 
     updateDisplay() {
-        if (this.currentView === 'card') {
-            this.updateCryptoCards(this.currentData);
-        } else {
-            this.updateCryptoTable(this.currentData);
-        }
-    }
-
-    updateCryptoCards(cryptoData) {
-        if (!this.cryptoGrid) return;
-
-        this.cryptoGrid.innerHTML = '';
-        
-        cryptoData.forEach(crypto => {
-            const card = this.createCryptoCard(crypto);
-            this.cryptoGrid.appendChild(card);
-        });
+        this.updateCryptoTable(this.currentData);
     }
 
     updateCryptoTable(cryptoData) {
@@ -197,56 +292,6 @@ class CryptoApp {
         `;
         
         return row;
-    }
-
-    createCryptoCard(crypto) {
-        const card = document.createElement('div');
-        card.className = 'crypto-card';
-        card.setAttribute('data-symbol', crypto.symbol);
-
-        const changeClass = crypto.price_change_percentage_24h >= 0 ? 'positive' : 'negative';
-        const changeSymbol = crypto.price_change_percentage_24h >= 0 ? '+' : '';
-
-        card.innerHTML = `
-            <div class="crypto-header">
-                <div class="crypto-icon">
-                    ${crypto.symbol.substring(0, 2)}
-                </div>
-                <div class="crypto-info">
-                    <h3>${crypto.name}</h3>
-                    <span class="crypto-symbol">${crypto.symbol}</span>
-                </div>
-            </div>
-            <div class="crypto-price">
-                $${this.formatPrice(crypto.price_usd)}
-            </div>
-            <div class="crypto-change ${changeClass}">
-                ${changeSymbol}${crypto.price_change_percentage_24h?.toFixed(2) || '0.00'}%
-                <span style="margin-left: 8px; font-size: 0.8em; color: #666;">
-                    ${changeSymbol}$${this.formatPrice(crypto.price_change_24h || 0)}
-                </span>
-            </div>
-            <div class="crypto-details">
-                <div class="detail-item">
-                    <span class="detail-label">市值:</span>
-                    <span>${this.formatMarketCap(crypto.market_cap)}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">24h交易量:</span>
-                    <span>${this.formatMarketCap(crypto.volume_24h)}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">排名:</span>
-                    <span>#${crypto.rank || 'N/A'}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">数据源:</span>
-                    <span>${crypto.source}</span>
-                </div>
-            </div>
-        `;
-
-        return card;
     }
 
     sortTable(column) {
@@ -419,219 +464,74 @@ class CryptoApp {
         });
     }
 
-    initChart() {
-        const ctx = document.getElementById('price-chart').getContext('2d');
-        this.priceChart = new Chart(ctx, {
-            type: 'line',
-            data: this.chartData,
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: '加密货币价格趋势',
-                        font: {
-                            size: 16,
-                            weight: 'bold'
-                        }
-                    },
-                    legend: {
-                        display: true,
-                        position: 'top'
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: false,
-                        ticks: {
-                            callback: function(value) {
-                                return '$' + value.toLocaleString();
-                            }
-                        }
-                    },
-                    x: {
-                        display: true
-                    }
-                },
-                interaction: {
-                    intersect: false,
-                    mode: 'index'
-                }
-            }
-        });
-    }
-
-    updateChart(cryptoData) {
-        if (!this.priceChart || !cryptoData.length) return;
-        
-        // 取前10个加密货币的数据
-        const topCryptos = cryptoData.slice(0, 10);
-        
-        this.chartData.labels = topCryptos.map(crypto => crypto.symbol);
-        this.chartData.datasets = [{
-            label: '当前价格 (USD)',
-            data: topCryptos.map(crypto => crypto.price_usd),
-            borderColor: 'rgb(102, 126, 234)',
-            backgroundColor: 'rgba(102, 126, 234, 0.1)',
-            borderWidth: 2,
-            fill: true,
-            tension: 0.4
-        }];
-        
-        this.priceChart.update();
-    }
-
-    setupAutoRefresh() {
-        setInterval(() => {
-            this.loadInitialData();
-        }, 30000); // 每30秒刷新一次
-    }
-
-    showError(message) {
-        const errorDiv = document.createElement('div');
-        errorDiv.className = 'error-message';
-        errorDiv.textContent = message;
-        
-        const container = document.querySelector('.container');
-        container.insertBefore(errorDiv, container.firstChild);
-        
-        setTimeout(() => {
-            errorDiv.remove();
-        }, 5000);
-    }
-
-    async checkScraperStatus(showMessage = true) {
-        try {
-            const response = await fetch('/api/scraper/status');
-            const result = await response.json();
-            
-            if (result.success) {
-                this.scraperStatus = result;
-                this.updateScraperStatusDisplay();
-                
-                if (showMessage) {
-                    const statusText = result.is_running ? '爬虫正在运行' : '爬虫已停止';
-                    this.showMessage(statusText, result.is_running ? 'success' : 'info');
-                }
-            } else {
-                if (showMessage) {
-                    this.showMessage('获取爬虫状态失败: ' + result.error, 'error');
-                }
-            }
-        } catch (error) {
-            if (showMessage) {
-                this.showMessage('检查爬虫状态时发生错误: ' + error.message, 'error');
-            }
-        }
-    }
-
-    async startScraper() {
-        try {
-            const response = await fetch('/api/scraper/start', {
-                method: 'POST'
-            });
-            const result = await response.json();
-            
-            if (result.success) {
-                this.showMessage(result.message, 'success');
-                setTimeout(() => this.checkScraperStatus(false), 2000);
-            } else {
-                this.showMessage(result.message || result.error, 'error');
-            }
-        } catch (error) {
-            this.showMessage('启动爬虫时发生错误: ' + error.message, 'error');
-        }
-    }
-
-    async stopScraper() {
-        try {
-            const response = await fetch('/api/scraper/stop', {
-                method: 'POST'
-            });
-            const result = await response.json();
-            
-            if (result.success) {
-                this.showMessage(result.message, 'success');
-                setTimeout(() => this.checkScraperStatus(false), 1000);
-            } else {
-                this.showMessage(result.message || result.error, 'error');
-            }
-        } catch (error) {
-            this.showMessage('停止爬虫时发生错误: ' + error.message, 'error');
-        }
-    }
-
-    async runScraperOnce() {
-        try {
-            const response = await fetch('/api/scraper/run-once', {
-                method: 'POST'
-            });
-            const result = await response.json();
-            
-            if (result.success) {
-                this.showMessage(result.message, 'success');
-            } else {
-                this.showMessage(result.error, 'error');
-            }
-        } catch (error) {
-            this.showMessage('手动爬取时发生错误: ' + error.message, 'error');
-        }
-    }
-
-    updateScraperStatusDisplay() {
-        const statusElement = document.getElementById('scraper-status');
-        const statusTextElement = document.getElementById('scraper-status-text');
-        const nextRunElement = document.getElementById('next-run-time');
-        
-        if (this.scraperStatus) {
-            statusElement.style.display = 'block';
-            
-            if (this.scraperStatus.is_running) {
-                statusTextElement.textContent = `🟢 爬虫运行中 (${this.scraperStatus.active_jobs} 个任务)`;
-                statusTextElement.className = 'status-running';
-                
-                if (this.scraperStatus.next_run) {
-                    const nextRun = new Date(this.scraperStatus.next_run);
-                    nextRunElement.textContent = `下次运行: ${nextRun.toLocaleString()}`;
-                } else {
-                    nextRunElement.textContent = '';
-                }
-            } else {
-                statusTextElement.textContent = '🔴 爬虫已停止';
-                statusTextElement.className = 'status-stopped';
-                nextRunElement.textContent = '';
-            }
-        }
-    }
-
     showMessage(message, type = 'info') {
-        // 创建消息提示
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${type}`;
         messageDiv.textContent = message;
         
-        // 添加到页面
         document.body.appendChild(messageDiv);
         
-        // 3秒后自动移除
         setTimeout(() => {
             messageDiv.remove();
         }, 3000);
     }
-}
 
-// WebSocket更新处理函数
-function updateCryptoCards(cryptoData) {
-    if (window.cryptoApp) {
-        window.cryptoApp.currentData = cryptoData;
-        window.cryptoApp.updateDisplay();
+    showError(message) {
+        this.showMessage(message, 'error');
     }
-}
 
-function updatePriceChart(cryptoData) {
-    if (window.cryptoApp) {
-        window.cryptoApp.updateChart(cryptoData);
+    // 日志相关方法
+    addLogMessage(message, type = 'info', timestamp = null) {
+        const logContent = this.logContent;
+        if (!logContent) return;
+        
+        const logMessage = document.createElement('div');
+        logMessage.className = `log-message ${type}`;
+        
+        const timeStr = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+        
+        logMessage.innerHTML = `
+            <span class="timestamp">[${timeStr}]</span>
+            <span class="message">${message}</span>
+        `;
+        
+        logContent.appendChild(logMessage);
+        
+        // 限制日志条数
+        const messages = logContent.querySelectorAll('.log-message');
+        if (messages.length > this.maxLogMessages) {
+            messages[0].remove();
+        }
+        
+        // 自动滚动到底部
+        const autoScroll = document.getElementById('auto-scroll');
+        if (autoScroll && autoScroll.checked) {
+            logContent.scrollTop = logContent.scrollHeight;
+        }
+    }
+
+    clearLogs() {
+        if (this.logContent) {
+            this.logContent.innerHTML = `
+                <div class="log-message info">
+                    <span class="timestamp">[系统]</span>
+                    <span class="message">日志已清空</span>
+                </div>
+            `;
+        }
+    }
+
+    // 添加缺失的 setupAutoRefresh 方法
+    setupAutoRefresh() {
+        // 每30秒刷新一次数据
+        setInterval(() => {
+            this.loadInitialData();
+        }, 30000);
+
+        // 每10秒检查一次爬虫状态
+        setInterval(() => {
+            this.checkAllScrapersStatus();
+        }, 10000);
     }
 }
 
@@ -639,3 +539,14 @@ function updatePriceChart(cryptoData) {
 document.addEventListener('DOMContentLoaded', () => {
     window.cryptoApp = new CryptoApp();
 });
+
+// 删除这两个有问题的 setInterval 调用
+// setInterval(() => {
+//     this.loadInitialData();
+// }, 30000);
+
+// setInterval(() => {
+//     this.checkAllScrapersStatus();
+// }, 10000);
+
+

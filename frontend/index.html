@@ -3,24 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>加密货币实时监控</title>
+    <title>加密货币实时爬取</title>
     <link rel="stylesheet" href="css/style.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="js/socket.io.min.js"></script>
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>🚀 加密货币实时监控</h1>
-            <div class="status-indicator">
-                <span id="connection-status">连接中...</span>
-            </div>
-        </header>
-        
         <!-- 控制面板 -->
         <div class="control-panel">
             <div class="view-controls">
                 <button id="table-view-btn" class="view-btn active">📋 表格视图</button>
+                <button id="log-view-btn" class="view-btn">📝 日志视图</button>
             </div>
             
             <!-- 爬虫控制面板 -->
@@ -32,13 +25,47 @@
                 <div class="scraper-actions">
                     <button id="start-scraper-btn" class="scraper-btn start-btn">▶️ 启动爬虫</button>
                     <button id="stop-scraper-btn" class="scraper-btn stop-btn">⏹️ 停止爬虫</button>
-                    <button id="run-once-btn" class="scraper-btn once-btn">🔄 单次运行</button>
                 </div>
             </div>
             
             <div class="export-controls">
                 <button id="export-csv-btn" class="export-btn">📥 导出CSV</button>
                 <button id="export-json-btn" class="export-btn">📄 导出JSON</button>
+                <button id="clear-logs-btn" class="export-btn">🗑️ 清空日志</button>
+            </div>
+        </div>
+        
+        <!-- 爬取页面列表控制 -->
+        <div class="scraper-list-controls">
+            <h3>🎯 爬取页面列表</h3>
+            <div class="scraper-items">
+                <div class="scraper-item">
+                    <div class="scraper-info">
+                        <span class="scraper-name">🪙 CoinGecko 加密货币数据</span>
+                        <span class="scraper-description">获取加密货币基础数据、价格、市值等信息</span>
+                    </div>
+                    <div class="scraper-controls">
+                        <label class="switch">
+                            <input type="checkbox" id="coingecko-toggle" data-scraper="coingecko">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="scraper-status" id="coingecko-status">已停止</span>
+                    </div>
+                </div>
+                
+                <div class="scraper-item">
+                    <div class="scraper-info">
+                        <span class="scraper-name">💼 DropsTab 投资者数据</span>
+                        <span class="scraper-description">获取投资者基础数据、成功率、收益等信息</span>
+                    </div>
+                    <div class="scraper-controls">
+                        <label class="switch">
+                            <input type="checkbox" id="dropstab-toggle" data-scraper="dropstab">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="scraper-status" id="dropstab-status">已停止</span>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -46,6 +73,24 @@
         <div id="message-container" class="message-container"></div>
         
         <main>
+            <!-- 日志视图 -->
+            <div class="log-container" id="log-container" style="display: none;">
+                <div class="log-header">
+                    <h3>📝 爬虫运行日志</h3>
+                    <div class="log-controls">
+                        <label>
+                            <input type="checkbox" id="auto-scroll" checked> 自动滚动
+                        </label>
+                    </div>
+                </div>
+                <div class="log-content" id="log-content">
+                    <div class="log-message info">
+                        <span class="timestamp">[系统]</span>
+                        <span class="message">日志系统已启动，等待爬虫运行...</span>
+                    </div>
+                </div>
+            </div>
+            
             <!-- 表格视图 -->
             <div class="table-container" id="table-container">
                 <div class="table-wrapper">
@@ -69,10 +114,6 @@
                         </tbody>
                     </table>
                 </div>
-            </div>
-            
-            <div class="chart-container">
-                <canvas id="price-chart"></canvas>
             </div>
         </main>
     </div>

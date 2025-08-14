@@ -25,9 +25,13 @@ class Config:
     API_PORT = int(os.getenv('API_PORT', 5000))
     
     # 爬虫配置 - 随机间隔
-    SCRAPE_INTERVAL_MIN = int(os.getenv('SCRAPE_INTERVAL_MIN', 600))  # 最小间隔10分钟
-    SCRAPE_INTERVAL_MAX = int(os.getenv('SCRAPE_INTERVAL_MAX', 1800))  # 最大间隔30分钟
-    SCRAPE_INTERVAL = int(os.getenv('SCRAPE_INTERVAL', 900))  # 默认15分钟（作为备用）
+    SCRAPE_INTERVAL_MIN = int(os.getenv('SCRAPE_INTERVAL_MIN', 60))  # 最小间隔1分钟
+    SCRAPE_INTERVAL_MAX = int(os.getenv('SCRAPE_INTERVAL_MAX', 600))  # 最大间隔10分钟
+    SCRAPE_INTERVAL = int(os.getenv('SCRAPE_INTERVAL', 300))  # 默认5分钟（作为备用）
+    
+    # 投资者爬虫专用配置
+    INVESTOR_SCRAPE_INTERVAL_MIN = int(os.getenv('INVESTOR_SCRAPE_INTERVAL_MIN', 60))  # 最小间隔1分钟
+    INVESTOR_SCRAPE_INTERVAL_MAX = int(os.getenv('INVESTOR_SCRAPE_INTERVAL_MAX', 600))  # 最大间隔10分钟
     
     # 页面间随机延迟配置
     PAGE_DELAY_MIN = float(os.getenv('PAGE_DELAY_MIN', 2.0))  # 页面间最小延迟2秒

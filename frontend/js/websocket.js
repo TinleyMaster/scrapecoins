@@ -10,12 +10,35 @@ class WebSocketManager {
 
     connect() {
         try {
+            // 检查Socket.IO是否已加载
+            if (typeof io === 'undefined') {
+                console.error('Socket.IO库未加载，请检查网络连接或CDN可用性');
+                this.updateStatus('disconnected');
+                // 尝试动态加载Socket.IO
+                this.loadSocketIO();
+                return;
+            }
+            
             this.socket = io();
             this.setupEventListeners();
         } catch (error) {
             console.error('WebSocket连接失败:', error);
             this.updateStatus('disconnected');
         }
+    }
+
+    loadSocketIO() {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js';
+        script.onload = () => {
+            console.log('Socket.IO库动态加载成功');
+            this.connect();
+        };
+        script.onerror = () => {
+            console.error('Socket.IO库动态加载失败');
+            this.updateStatus('disconnected');
+        };
+        document.head.appendChild(script);
     }
 
     setupEventListeners() {
@@ -36,6 +59,12 @@ class WebSocketManager {
             this.handleCryptoUpdate(data);
         });
 
+        // 添加日志事件监听
+        this.socket.on('scraper_log', (data) => {
+            console.log('收到爬虫日志:', data);
+            this.handleScraperLog(data);
+        });
+
         this.socket.on('connect_error', (error) => {
             console.error('WebSocket连接错误:', error);
             this.updateStatus('disconnected');
@@ -45,13 +74,18 @@ class WebSocketManager {
 
     handleCryptoUpdate(data) {
         if (data && data.data) {
-            // 更新加密货币卡片
-            updateCryptoCards(data.data);
-            
-            // 更新图表
-            if (window.priceChart) {
-                updatePriceChart(data.data);
+            // 直接更新应用数据
+            if (window.cryptoApp) {
+                window.cryptoApp.currentData = data.data;
+                window.cryptoApp.updateDisplay();
             }
+        }
+    }
+
+    // 新增：处理爬虫日志
+    handleScraperLog(data) {
+        if (window.cryptoApp) {
+            window.cryptoApp.addLogMessage(data.message, data.type || 'info', data.timestamp);
         }
     }
 
