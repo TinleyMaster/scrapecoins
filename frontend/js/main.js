@@ -88,6 +88,14 @@ class CryptoApp {
             });
         }
         
+        // 新增：Tokenomist 开关
+        const tokenomistToggle = document.getElementById('tokenomist-toggle');
+        if (tokenomistToggle) {
+            tokenomistToggle.addEventListener('change', (e) => {
+                this.toggleScraper('tokenomist', e.target.checked);
+            });
+        }
+        
         // 导出按钮
         const exportCsvBtn = document.getElementById('export-csv-btn');
         if (exportCsvBtn) {
@@ -156,7 +164,8 @@ class CryptoApp {
     async checkAllScrapersStatus() {
         await Promise.all([
             this.checkScraperStatus('coingecko'),
-            this.checkScraperStatus('dropstab')
+            this.checkScraperStatus('dropstab'),
+            this.checkScraperStatus('tokenomist') // 新增
         ]);
         this.updateGlobalScraperStatus();
     }
@@ -193,7 +202,7 @@ class CryptoApp {
     }
 
     async startAllScrapers() {
-        const toggles = ['coingecko-toggle', 'dropstab-toggle'];
+        const toggles = ['coingecko-toggle', 'dropstab-toggle', 'tokenomist-toggle']; // 新增 tokenomist
         for (const toggleId of toggles) {
             const toggle = document.getElementById(toggleId);
             if (toggle && !toggle.checked) {
@@ -204,7 +213,7 @@ class CryptoApp {
     }
 
     async stopAllScrapers() {
-        const toggles = ['coingecko-toggle', 'dropstab-toggle'];
+        const toggles = ['coingecko-toggle', 'dropstab-toggle', 'tokenomist-toggle']; // 新增 tokenomist
         for (const toggleId of toggles) {
             const toggle = document.getElementById(toggleId);
             if (toggle && toggle.checked) {

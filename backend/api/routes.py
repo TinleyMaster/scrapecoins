@@ -159,6 +159,10 @@ def start_scraper_by_type(scraper_type):
         elif scraper_type == 'dropstab':
             from ..scrapers.scheduler import start_investor_scraping_jobs
             start_investor_scraping_jobs(current_app)
+        elif scraper_type == 'tokenomist':
+            # 新增：启动 tokenomist 爬虫
+            from ..scrapers.scheduler import start_tokenomist_scraping_jobs
+            start_tokenomist_scraping_jobs(current_app)
         else:
             return jsonify({
                 'success': False,

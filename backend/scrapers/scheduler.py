@@ -17,6 +17,21 @@ from datetime import datetime, timedelta
 _app_instance = None
 _app_config = None  # 添加配置缓存
 
+# 新增：统一的停止标志存储
+_scraper_stop_flags = {
+    'coingecko': False,
+    'dropstab': False,
+    'tokenomist': False,
+}
+
+def set_scraper_stop_flag(scraper_type, flag=True):
+    """设置爬虫停止标志（供 /scraper/<type>/stop 使用）"""
+    try:
+        _scraper_stop_flags[scraper_type] = bool(flag)
+        log_and_emit(f"🛑 已设置 {scraper_type} 爬虫停止标志为 {flag}", 'warning')
+    except Exception as e:
+        print(f"设置停止标志失败: {e}")
+
 def send_log_to_frontend(message, log_type='info'):
     """发送日志消息到前端"""
     try:
@@ -279,63 +294,175 @@ def start_investor_scraping_jobs(app):
         
         schedule_next_investor_scrape()
 
+# 新增：Tokenomist 调度
+def start_tokenomist_scraping_jobs(app):
+    """启动 Tokenomist 代币解锁爬虫定时任务（即时执行一次并调度下一次）"""
+    global _app_instance, _app_config
+    set_app_instance(app)
+    # 清除停止标志
+    set_scraper_stop_flag('tokenomist', False)
+    with app.app_context():
+        min_interval = app.config.get('SCRAPE_INTERVAL_MIN', 600)
+        max_interval = app.config.get('SCRAPE_INTERVAL_MAX', 1800)
+        log_and_emit(f"🔓 Tokenomist 爬虫调度已启动 (间隔: {min_interval//60}-{max_interval//60}分钟)", 'info')
+        # 立即执行一次
+        scheduler.add_job(
+            func=scrape_tokenomist_data_and_reschedule,
+            trigger="date",
+            run_date=datetime.now(),
+            id='tokenomist_scraper_initial',
+            name='初始 Tokenomist 代币解锁爬取',
+            replace_existing=True
+        )
+        schedule_next_tokenomist_scrape()
+
+def scrape_tokenomist_data_and_reschedule():
+    """执行一次 Tokenomist 爬取并调度下一次"""
+    scrape_tokenomist_data()
+    schedule_next_tokenomist_scrape()
+
+def scrape_tokenomist_data():
+    """Tokenomist 代币解锁爬取任务（调用 Playwright 脚本）"""
+    start_time = datetime.now()
+    log_and_emit(f"=== 开始 Tokenomist 代币解锁爬取 {start_time.strftime('%Y-%m-%d %H:%M:%S')} ===", 'info')
+    try:
+        if not _app_instance:
+            log_and_emit("❌ 应用实例未设置", 'error')
+            return
+
+        # 如果已下达停止标志，直接跳过本次执行
+        if _scraper_stop_flags.get('tokenomist'):
+            log_and_emit("⏹️ 已设置 Tokenomist 停止标志，跳过本次执行", 'warning')
+            return
+
+        with _app_instance.app_context():
+            # 懒加载，避免无 Playwright 时模块导入失败影响其他爬虫
+            from ..scrapers.tokenomist_scraper import TokenomistScraper
+            import asyncio
+
+            # 执行一次异步爬取
+            log_and_emit("🚀 正在启动 Playwright 无头浏览器...", 'info')
+            # 传入 should_stop 回调，使运行中的任务也能及时退出
+            asyncio.run(TokenomistScraper(should_stop=lambda: _scraper_stop_flags.get('tokenomist', False)).run())
+            log_and_emit("✅ Tokenomist 爬取任务完成", 'success')
+
+    except Exception as e:
+        log_and_emit(f"❌ Tokenomist 爬取失败: {e}", 'error')
+
+def schedule_next_tokenomist_scrape():
+    """调度下一次 Tokenomist 爬取（遵循随机间隔），如已下达停止标志则不再调度"""
+    try:
+        if not _app_config:
+            print("❌ 应用配置未初始化")
+            return
+
+        # 如设置了停止标志则不调度
+        if _scraper_stop_flags.get('tokenomist'):
+            log_and_emit("⏹️ 已设置 Tokenomist 停止标志，停止后续调度", 'warning')
+            try:
+                scheduler.remove_job('tokenomist_scraper_scheduled')
+            except Exception:
+                pass
+            return
+
+        min_interval = _app_config.get('SCRAPE_INTERVAL_MIN', 600)
+        max_interval = _app_config.get('SCRAPE_INTERVAL_MAX', 1800)
+        next_interval = get_next_random_interval(min_interval, max_interval)
+        next_run_time = datetime.now() + timedelta(seconds=next_interval)
+
+        # 先移除旧的
+        try:
+            scheduler.remove_job('tokenomist_scraper_scheduled')
+        except Exception:
+            pass
+
+        scheduler.add_job(
+            func=scrape_tokenomist_data_and_reschedule,
+            trigger="date",
+            run_date=next_run_time,
+            id='tokenomist_scraper_scheduled',
+            name='定时 Tokenomist 代币解锁爬取',
+            replace_existing=True
+        )
+
+        log_and_emit(
+            f"⏰ 下次 Tokenomist 爬取时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')} (间隔: {next_interval//60}分{next_interval%60}秒)",
+            'info'
+        )
+
+    except Exception as e:
+        log_and_emit(f"❌ 调度下一次 Tokenomist 爬取失败: {e}", 'error')
+
+# 保持原有的统一启动方法以兼容旧接口
+def start_scraping_jobs(app):
+    """启动所有爬虫定时任务"""
+    start_crypto_scraping_jobs(app)
+    start_investor_scraping_jobs(app)
+    # 可选：同时启动 Tokenomist（如不希望默认启动可注释掉）
+    # start_tokenomist_scraping_jobs(app)
 def scrape_investor_data_and_reschedule():
     """爬取投资者数据并重新调度"""
     scrape_investor_data()
     schedule_next_investor_scrape()
 
 def scrape_investor_data():
-    """爬取投资者数据的定时任务"""
+    """执行一次 DropsTab 投资者数据爬取"""
     start_time = datetime.now()
-    log_and_emit(f"=== 开始投资者数据爬取任务 {start_time.strftime('%Y-%m-%d %H:%M:%S')} ===", 'info')
-    
+    log_and_emit(f"=== 开始 DropsTab 投资者数据爬取 {start_time.strftime('%Y-%m-%d %H:%M:%S')} ===", 'info')
     try:
         if not _app_instance:
             log_and_emit("❌ 应用实例未设置", 'error')
             return
-            
+
         with _app_instance.app_context():
-            from ..database.db import InvestorDataManager
+            # 懒加载，避免导入开销或依赖问题
             from ..scrapers.dropstab import DropstabScraper
-            
-            investor_manager = InvestorDataManager()
-            if not investor_manager.test_connection():
-                log_and_emit("❌ 投资者数据库连接失败，终止爬取任务", 'error')
-                return
-            
-            log_and_emit("🚀 开始爬取 DropsTab 投资者数据...", 'info')
-            
+
+            # 读取可选的最大页数配置（如未配置则使用爬虫默认的 370）
+            max_pages = None
+            if _app_config:
+                max_pages = _app_config.get('INVESTOR_MAX_PAGES', None)
+
             scraper = DropstabScraper()
-            scraped_data = scraper.scrape_all_investors_data(save_csv=False, save_db=True)
-            
-            if scraped_data:
-                log_and_emit(f"✅ 投资者数据爬取完成，共获取 {len(scraped_data)} 条数据", 'success')
+            if max_pages is not None:
+                log_and_emit(f"🚀 正在爬取投资者数据（最多 {max_pages} 页）...", 'info')
+                scraper.scrape_investors_data(max_pages=max_pages)
             else:
-                log_and_emit("⚠️ 投资者数据爬取完成，但未获取到数据", 'warning')
-                
+                log_and_emit("🚀 正在爬取投资者数据（使用默认最大页数）...", 'info')
+                scraper.scrape_investors_data()
+
+            log_and_emit("✅ 投资者数据爬取完成", 'success')
+
     except Exception as e:
         log_and_emit(f"❌ 投资者数据爬取失败: {e}", 'error')
 
 def schedule_next_investor_scrape():
-    """调度下次投资者数据爬取任务"""
+    """调度下次 DropsTab 投资者数据爬取"""
     try:
         if not _app_config:
             print("❌ 应用配置未初始化")
             return
-            
-        min_interval = _app_config.get('INVESTOR_SCRAPE_INTERVAL_MIN', 3600)
-        max_interval = _app_config.get('INVESTOR_SCRAPE_INTERVAL_MAX', 7200)
-        
+
+        # 如果设置了停止标志则不再调度
+        if _scraper_stop_flags.get('dropstab'):
+            log_and_emit("⏹️ 已设置 DropsTab 停止标志，停止后续调度", 'warning')
+            try:
+                scheduler.remove_job('investor_scraper_scheduled')
+            except Exception:
+                pass
+            return
+
+        min_interval = _app_config.get('INVESTOR_SCRAPE_INTERVAL_MIN', 60)
+        max_interval = _app_config.get('INVESTOR_SCRAPE_INTERVAL_MAX', 600)
         next_interval = get_next_random_interval(min_interval, max_interval)
         next_run_time = datetime.now() + timedelta(seconds=next_interval)
-        
-        # 移除现有的调度任务
+
+        # 先移除旧任务（若存在）
         try:
             scheduler.remove_job('investor_scraper_scheduled')
-        except:
+        except Exception:
             pass
-        
-        # 添加新的调度任务
+
         scheduler.add_job(
             func=scrape_investor_data_and_reschedule,
             trigger="date",
@@ -344,15 +471,10 @@ def schedule_next_investor_scrape():
             name='定时投资者数据爬取',
             replace_existing=True
         )
-        
-        next_time_message = f"⏰ 下次投资者数据爬取时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')} (间隔: {next_interval//60}分{next_interval%60}秒)"
-        log_and_emit(next_time_message, 'info')
-        
-    except Exception as e:
-        log_and_emit(f"❌ 调度下次投资者数据爬取任务失败: {e}", 'error')
 
-# 保持原有的统一启动方法以兼容旧接口
-def start_scraping_jobs(app):
-    """启动所有爬虫定时任务"""
-    start_crypto_scraping_jobs(app)
-    start_investor_scraping_jobs(app)
+        log_and_emit(
+            f"⏰ 下次投资者数据爬取时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')} (间隔: {next_interval//60}分{next_interval%60}秒)",
+            'info'
+        )
+    except Exception as e:
+        log_and_emit(f"❌ 调度下一次投资者数据爬取失败: {e}", 'error')
