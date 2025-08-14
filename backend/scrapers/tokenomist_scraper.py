@@ -546,7 +546,7 @@ class TokenomistScraper:
         return []
     
     def save_to_mongodb(self, data_list: List[Dict[str, Any]]) -> bool:
-        """保存数据到 MongoDB（去重：按自然键 upsert）"""
+        """保存数据到 MongoDB（去重：按 source + token_name upsert）"""
         if not data_list:
             print("⚠️ 无数据需要保存")
             return False
@@ -558,15 +558,15 @@ class TokenomistScraper:
                 token_unlock = TokenUnlockData(data)
                 token_unlock_docs.append(token_unlock.to_dict())
             
-            # 批量 upsert，按自然键（source, token_name, unlock_time, unlock_amount）
+            # 批量 upsert，使用简化的去重策略：仅 source + token_name
             ops = []
             for doc in token_unlock_docs:
+                # 去重策略：只使用 source 和 token_name
                 filter_doc = {
                     'source': doc.get('source', 'tokenomist.ai'),
-                    'token_name': doc.get('token_name', ''),
-                    'unlock_time': doc.get('unlock_time', ''),
-                    'unlock_amount': doc.get('unlock_amount', ''),
+                    'token_name': doc.get('token_name', '').strip(),  # 去除空格
                 }
+                
                 update_doc = {
                     '$set': {
                         # 即将解锁相关字段
@@ -590,7 +590,6 @@ class TokenomistScraper:
                 return False
             
             result = self.collection.bulk_write(ops, ordered=False)
-            # 统计结果
             upserted = result.upserted_count
             modified = result.modified_count
             matched = result.matched_count
@@ -601,14 +600,23 @@ class TokenomistScraper:
             print(f"✗ 保存到 MongoDB 失败: {e}")
             return False
     
-    def save_to_csv(self, data_list: List[Dict[str, Any]], filename: str = 'token_unlocks.csv') -> bool:
-        """保存数据到 CSV 文件（备份）"""
+    def save_to_csv(self, data_list: List[Dict[str, Any]], archive_dir: str = 'data/archives') -> bool:
+        """保存数据到 CSV 文件（按时间命名存档）"""
         if not data_list:
             print("⚠️ 无数据需要保存到CSV")
             return False
         
         try:
-            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+            # 创建存档目录
+            os.makedirs(archive_dir, exist_ok=True)
+            
+            # 生成时间戳文件名
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f'tokenomist_unlocks_{timestamp}.csv'
+            filepath = os.path.join(archive_dir, filename)
+            
+            # 保存到时间戳文件
+            with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
                 if data_list:
                     fieldnames = data_list[0].keys()
                     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -619,13 +627,55 @@ class TokenomistScraper:
                     # 写入数据
                     writer.writerows(data_list)
             
-            print(f"✓ 数据已保存到 CSV 文件: {filename}")
+            print(f"✓ 数据已存档到: {filepath}")
+            
+            # 同时保存到根目录的最新文件（保持向后兼容）
+            latest_filename = 'token_unlocks.csv'
+            with open(latest_filename, 'w', newline='', encoding='utf-8') as csvfile:
+                if data_list:
+                    fieldnames = data_list[0].keys()
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(data_list)
+            
+            print(f"✓ 最新数据已保存到: {latest_filename}")
             return True
         
         except Exception as e:
             print(f"✗ 保存到 CSV 失败: {e}")
             return False
-    
+
+    def save_to_csv_with_cleanup(self, data_list: List[Dict[str, Any]], archive_dir: str = 'data/archives', keep_days: int = 30) -> bool:
+        """保存数据到 CSV 文件并清理旧文件"""
+        if not self.save_to_csv(data_list, archive_dir):
+            return False
+        
+        try:
+            # 清理超过指定天数的旧文件
+            import time
+            current_time = time.time()
+            cutoff_time = current_time - (keep_days * 24 * 60 * 60)
+            
+            if os.path.exists(archive_dir):
+                for filename in os.listdir(archive_dir):
+                    if filename.startswith('tokenomist_unlocks_') and filename.endswith('.csv'):
+                        filepath = os.path.join(archive_dir, filename)
+                        file_time = os.path.getctime(filepath)
+                        
+                        if file_time < cutoff_time:
+                            os.remove(filepath)
+                            print(f"🗑️ 已清理旧文件: {filename}")
+            
+            return True
+        
+        except Exception as e:
+            print(f"⚠️ 清理旧文件时出错: {e}")
+            return True  # 保存成功，清理失败不影响主要功能
+        
+        except Exception as e:
+            print(f"⚠️ 清理旧文件时出错: {e}")
+            return True  # 保存成功，清理失败不影响主要功能
+
     async def run(self):
         """主运行方法"""
         print("🚀 Tokenomist.ai 代币解锁信息爬虫启动")
@@ -642,8 +692,8 @@ class TokenomistScraper:
                 # 保存到 MongoDB
                 self.save_to_mongodb(data)
                 
-                # 同时保存到 CSV 作为备份
-                self.save_to_csv(data)
+                # 保存到 CSV 存档（带自动清理）
+                self.save_to_csv_with_cleanup(data, archive_dir='data/archives', keep_days=30)
                 
                 print(f"🎉 爬取完成！获取 {len(data)} 条代币解锁信息")
             else:

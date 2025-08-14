@@ -33,6 +33,10 @@ class Config:
     INVESTOR_SCRAPE_INTERVAL_MIN = int(os.getenv('INVESTOR_SCRAPE_INTERVAL_MIN', 60))  # 最小间隔1分钟
     INVESTOR_SCRAPE_INTERVAL_MAX = int(os.getenv('INVESTOR_SCRAPE_INTERVAL_MAX', 600))  # 最大间隔10分钟
     
+    # Tokenomist 爬虫专用配置 - 1分钟间隔
+    TOKENOMIST_SCRAPE_INTERVAL_MIN = int(os.getenv('TOKENOMIST_SCRAPE_INTERVAL_MIN', 60))  # 1分钟 = 60秒
+    TOKENOMIST_SCRAPE_INTERVAL_MAX = int(os.getenv('TOKENOMIST_SCRAPE_INTERVAL_MAX', 60))  # 1分钟 = 60秒
+    
     # 页面间随机延迟配置
     PAGE_DELAY_MIN = float(os.getenv('PAGE_DELAY_MIN', 2.0))  # 页面间最小延迟2秒
     PAGE_DELAY_MAX = float(os.getenv('PAGE_DELAY_MAX', 5.0))  # 页面间最大延迟5秒

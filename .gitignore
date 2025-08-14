@@ -65,4 +65,9 @@ yarn-error.log*
 
 # Temporary files
 *.tmp
-*.temp
+*.temp*
+
+# Data files and archives
+data/
+*.csv
+token_unlocks.csv
